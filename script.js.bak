@@ -1,0 +1,861 @@
+document.addEventListener('DOMContentLoaded', () => {
+
+  // ==========================================================================
+  // 1. COSMIC BLACK-HOLE CANVAS ENGINE
+  // ==========================================================================
+  const canvas = document.getElementById('cosmic-canvas');
+  let ctx = canvas ? canvas.getContext('2d') : null;
+  let animId = null;
+  let isPageVisible = !document.hidden;
+
+  // Parallax tracking
+  let mouseX = 0;
+  let mouseY = 0;
+  let targetMouseX = 0;
+  let targetMouseY = 0;
+
+  // Particle & Star collections
+  let particles = [];
+  let stars = [];
+  const PARTICLE_COUNT = window.innerWidth < 768 ? 90 : 190;
+  const STAR_COUNT = window.innerWidth < 768 ? 80 : 160;
+
+  // Cosmic color spectrum (vivid cyan, deep blue, purple, violet, subtle pink)
+  const cosmicColors = [
+    { r: 34, g: 211, b: 238, hex: '#22d3ee' },   // Electric Cyan
+    { r: 59, g: 130, b: 246, hex: '#3b82f6' },   // Cosmic Blue
+    { r: 139, g: 92, b: 246, hex: '#8b5cf6' },   // Violet
+    { r: 168, g: 85, b: 247, hex: '#a855f7' },   // Purple
+    { r: 236, g: 72, b: 153, hex: '#ec4899' },   // Subtle Pink
+    { r: 244, g: 114, b: 182, hex: '#f472b6' }   // Rose Nebula
+  ];
+
+  function getVortexCenter(w, h) {
+    if (w >= 992) {
+      // Desktop: positioned toward the right of the hero background
+      return { x: w * 0.72, y: h * 0.44 };
+    } else {
+      // Tablet/Mobile: centered behind hero content
+      return { x: w * 0.5, y: h * 0.36 };
+    }
+  }
+
+  function resizeCanvas() {
+    if (!canvas || !ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = `${window.innerWidth}px`;
+    canvas.style.height = `${window.innerHeight}px`;
+    ctx.scale(dpr, dpr);
+    initCosmicElements();
+  }
+
+  class CosmicStar {
+    constructor(w, h) {
+      this.reset(w, h);
+    }
+    reset(w, h) {
+      this.x = Math.random() * w;
+      this.y = Math.random() * h;
+      this.size = Math.random() * 1.5 + 0.5;
+      this.baseAlpha = Math.random() * 0.6 + 0.2;
+      this.twinkleSpeed = Math.random() * 0.03 + 0.008;
+      this.twinklePhase = Math.random() * Math.PI * 2;
+      this.layer = Math.random() * 0.6 + 0.2; // for parallax depth
+      const colorObj = cosmicColors[Math.floor(Math.random() * cosmicColors.length)];
+      this.color = `${colorObj.r}, ${colorObj.g}, ${colorObj.b}`;
+    }
+    draw(ctx, time, parallaxX, parallaxY) {
+      const alpha = Math.max(0.05, this.baseAlpha + Math.sin(time * this.twinkleSpeed + this.twinklePhase) * 0.25);
+      const px = this.x + parallaxX * this.layer * 15;
+      const py = this.y + parallaxY * this.layer * 15;
+      ctx.beginPath();
+      ctx.arc(px, py, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${this.color}, ${alpha})`;
+      ctx.fill();
+    }
+  }
+
+  class VortexParticle {
+    constructor(centerX, centerY, maxRadius) {
+      this.init(centerX, centerY, maxRadius, true);
+    }
+    init(centerX, centerY, maxRadius, randomAngle = false) {
+      this.centerX = centerX;
+      this.centerY = centerY;
+      this.maxRadius = maxRadius;
+      this.coreRadius = Math.max(45, Math.min(centerX, centerY) * 0.16);
+      
+      // Radius distribution: more concentrated in inner and mid accretion disk
+      const rFactor = Math.pow(Math.random(), 1.6);
+      this.radius = this.coreRadius * 1.1 + rFactor * (maxRadius - this.coreRadius);
+      this.angle = randomAngle ? Math.random() * Math.PI * 2 : Math.random() * Math.PI * 2;
+      
+      // Keplerian angular velocity: faster closer to singularity
+      const distRatio = Math.max(0.1, this.radius / this.coreRadius);
+      this.angularSpeed = (0.012 / Math.sqrt(distRatio)) * (0.85 + Math.random() * 0.3);
+      
+      // Inward gravitational spiral drift
+      this.inwardSpeed = (0.2 + Math.random() * 0.35) * (1 / distRatio);
+      
+      // Trail history for curved light streaks
+      this.history = [];
+      this.maxHistory = Math.floor(Math.random() * 4) + 4;
+      
+      // Color & Visuals
+      this.colorObj = cosmicColors[Math.floor(Math.random() * cosmicColors.length)];
+      this.size = Math.random() * 2 + 1;
+      this.alpha = Math.random() * 0.7 + 0.3;
+    }
+    update(centerX, centerY, speedMultiplier = 1) {
+      this.centerX = centerX;
+      this.centerY = centerY;
+
+      // Update position along inclined accretion ellipse
+      this.angle += this.angularSpeed * speedMultiplier;
+      this.radius -= this.inwardSpeed * speedMultiplier;
+
+      // Elliptical accretion projection (tilted ~ -25 degrees)
+      const tilt = -0.42; // inclination angle
+      const stretchX = 1.0;
+      const stretchY = 0.52; // flattened disc perspective
+
+      const rawX = Math.cos(this.angle) * this.radius * stretchX;
+      const rawY = Math.sin(this.angle) * this.radius * stretchY;
+
+      // Rotate by tilt
+      const x = this.centerX + (rawX * Math.cos(tilt) - rawY * Math.sin(tilt));
+      const y = this.centerY + (rawX * Math.sin(tilt) + rawY * Math.cos(tilt));
+
+      // Record history for smooth trailing curves
+      this.history.unshift({ x, y });
+      if (this.history.length > this.maxHistory) {
+        this.history.pop();
+      }
+
+      // If drawn past the event horizon, recycle to outer rim
+      if (this.radius <= this.coreRadius * 1.05) {
+        this.init(centerX, centerY, this.maxRadius, false);
+      }
+    }
+    draw(ctx, parallaxX, parallaxY) {
+      if (this.history.length < 2) return;
+      const shiftX = parallaxX * 22;
+      const shiftY = parallaxY * 22;
+
+      // Draw light trail
+      ctx.beginPath();
+      ctx.moveTo(this.history[0].x + shiftX, this.history[0].y + shiftY);
+      for (let i = 1; i < this.history.length; i++) {
+        ctx.lineTo(this.history[i].x + shiftX, this.history[i].y + shiftY);
+      }
+      ctx.strokeStyle = `rgba(${this.colorObj.r}, ${this.colorObj.g}, ${this.colorObj.b}, ${this.alpha * 0.45})`;
+      ctx.lineWidth = this.size;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // Draw leading glowing head
+      const head = this.history[0];
+      ctx.beginPath();
+      ctx.arc(head.x + shiftX, head.y + shiftY, this.size * 0.9, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${this.colorObj.r}, ${this.colorObj.g}, ${this.colorObj.b}, ${this.alpha})`;
+      ctx.fill();
+    }
+  }
+
+  function initCosmicElements() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const center = getVortexCenter(w, h);
+    const maxRadius = Math.max(w, h) * 0.55;
+
+    stars = [];
+    for (let i = 0; i < STAR_COUNT; i++) {
+      stars.push(new CosmicStar(w, h));
+    }
+
+    particles = [];
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push(new VortexParticle(center.x, center.y, maxRadius));
+    }
+  }
+
+  function drawBlackHoleVortex(ctx, cx, cy, radius, time, parallaxX, parallaxY) {
+    const shiftX = parallaxX * 18;
+    const shiftY = parallaxY * 18;
+    const posX = cx + shiftX;
+    const posY = cy + shiftY;
+
+    ctx.save();
+
+    // 1. Outer Deep Cosmic Gravitational Glow
+    const outerAura = ctx.createRadialGradient(posX, posY, radius * 0.8, posX, posY, radius * 4.5);
+    outerAura.addColorStop(0, 'rgba(59, 130, 246, 0.16)');
+    outerAura.addColorStop(0.3, 'rgba(139, 92, 246, 0.12)');
+    outerAura.addColorStop(0.6, 'rgba(236, 72, 153, 0.05)');
+    outerAura.addColorStop(1, 'transparent');
+    ctx.fillStyle = outerAura;
+    ctx.beginPath();
+    ctx.arc(posX, posY, radius * 4.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. Swirling Accretion Disk Base (Tilted Ellipse Glow)
+    ctx.save();
+    ctx.translate(posX, posY);
+    ctx.rotate(-0.42); // tilt
+    ctx.scale(1.0, 0.52); // perspective flattening
+
+    // Luminous inner accretion ring
+    const diskGrad = ctx.createRadialGradient(0, 0, radius * 0.9, 0, 0, radius * 2.8);
+    diskGrad.addColorStop(0, 'rgba(34, 211, 238, 0.45)');
+    diskGrad.addColorStop(0.25, 'rgba(96, 165, 250, 0.35)');
+    diskGrad.addColorStop(0.55, 'rgba(168, 85, 247, 0.25)');
+    diskGrad.addColorStop(0.85, 'rgba(236, 72, 153, 0.12)');
+    diskGrad.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = diskGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 2.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 3. Einstein Ring / Photon Sphere Glow (Lensing effect)
+    const photonRing = ctx.createRadialGradient(posX, posY, radius * 0.92, posX, posY, radius * 1.35);
+    photonRing.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+    photonRing.addColorStop(0.2, 'rgba(34, 211, 238, 0.85)');
+    photonRing.addColorStop(0.55, 'rgba(139, 92, 246, 0.5)');
+    photonRing.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = photonRing;
+    ctx.beginPath();
+    ctx.arc(posX, posY, radius * 1.35, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 4. Pure Black Singularity Event Horizon (The Void Core)
+    const coreGrad = ctx.createRadialGradient(posX, posY, 0, posX, posY, radius);
+    coreGrad.addColorStop(0, '#000000');
+    coreGrad.addColorStop(0.85, '#010206');
+    coreGrad.addColorStop(1, 'rgba(3, 5, 12, 0.98)');
+
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(posX, posY, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Crisp inner event boundary
+    ctx.strokeStyle = 'rgba(34, 211, 238, 0.6)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(posX, posY, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  let startTime = performance.now();
+
+  function animateCosmicScene(currentTime) {
+    if (!ctx || !canvas) return;
+    if (!isPageVisible) {
+      animId = requestAnimationFrame(animateCosmicScene);
+      return;
+    }
+
+    const time = (currentTime - startTime) * 0.001;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const center = getVortexCenter(w, h);
+    const coreRadius = Math.max(45, Math.min(center.x, center.y) * 0.16);
+
+    // Smooth lerp mouse parallax
+    mouseX += (targetMouseX - mouseX) * 0.05;
+    mouseY += (targetMouseY - mouseY) * 0.05;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, w, h);
+
+    // 1. Draw starfield
+    for (let i = 0; i < stars.length; i++) {
+      stars[i].draw(ctx, time, mouseX, mouseY);
+    }
+
+    // 2. Draw black-hole core and accretion disk glow
+    drawBlackHoleVortex(ctx, center.x, center.y, coreRadius, time, mouseX, mouseY);
+
+    // 3. Update and draw swirling cosmic particles and curving light trails
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const speedMultiplier = prefersReducedMotion ? 0.2 : 1.0;
+
+    for (let i = 0; i < particles.length; i++) {
+      particles[i].update(center.x, center.y, speedMultiplier);
+      particles[i].draw(ctx, mouseX, mouseY);
+    }
+
+    animId = requestAnimationFrame(animateCosmicScene);
+  }
+
+  // Parallax interaction listener (Desktop mousemove)
+  window.addEventListener('mousemove', (e) => {
+    const normX = (e.clientX / window.innerWidth) - 0.5;
+    const normY = (e.clientY / window.innerHeight) - 0.5;
+    targetMouseX = normX;
+    targetMouseY = normY;
+  }, { passive: true });
+
+  // Handle visibility change (pause when tab hidden to save CPU/battery)
+  document.addEventListener('visibilitychange', () => {
+    isPageVisible = !document.hidden;
+  });
+
+  // Handle window resizing
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+  }, { passive: true });
+
+  if (canvas) {
+    resizeCanvas();
+    animId = requestAnimationFrame(animateCosmicScene);
+  }
+
+  // ==========================================================================
+  // 2. DESKTOP MOUSE FOLLOW GLOW AURA
+  // ==========================================================================
+  const cursorGlow = document.getElementById('cursor-glow');
+  if (cursorGlow && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    window.addEventListener('mousemove', (e) => {
+      cursorGlow.style.transform = `translate3d(${e.clientX}px, ${e.clientY}px, 0)`;
+      cursorGlow.classList.add('active');
+    }, { passive: true });
+
+    document.addEventListener('mouseleave', () => {
+      cursorGlow.classList.remove('active');
+    });
+  }
+
+  // ==========================================================================
+  // 3. BACKGROUND CUSTOMIZER CONTROLLER
+  // ==========================================================================
+  const customizerToggle = document.getElementById('bg-customizer-toggle');
+  const customizerPanel = document.getElementById('bg-customizer-panel');
+  const customizerClose = document.getElementById('bg-customizer-close');
+  const optCosmic = document.getElementById('opt-cosmic-theme');
+  const optCustom = document.getElementById('opt-custom-theme');
+  const bgFileInput = document.getElementById('bg-file-input');
+  const dropZone = document.getElementById('bg-drop-zone');
+  const uploadStatusText = document.getElementById('upload-status-text');
+  const previewRow = document.getElementById('custom-img-preview-row');
+  const previewThumbnail = document.getElementById('custom-preview-thumbnail');
+  const previewFilename = document.getElementById('preview-filename');
+  const btnClearImg = document.getElementById('btn-clear-img');
+  const overlaySlider = document.getElementById('bg-overlay-slider');
+  const overlayDisplay = document.getElementById('overlay-value-display');
+  const btnResetTheme = document.getElementById('btn-reset-theme');
+
+  const customBgLayer = document.getElementById('custom-bg-layer');
+  const bgOverlay = document.getElementById('bg-overlay');
+
+  let currentObjectUrl = null;
+
+  function toggleCustomizer(open) {
+    if (!customizerPanel) return;
+    const shouldOpen = open !== undefined ? open : !customizerPanel.classList.contains('active');
+    if (shouldOpen) {
+      customizerPanel.classList.add('active');
+      customizerPanel.setAttribute('aria-hidden', 'false');
+      customizerToggle.setAttribute('aria-expanded', 'true');
+    } else {
+      customizerPanel.classList.remove('active');
+      customizerPanel.setAttribute('aria-hidden', 'true');
+      customizerToggle.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  if (customizerToggle) {
+    customizerToggle.addEventListener('click', () => toggleCustomizer());
+  }
+  if (customizerClose) {
+    customizerClose.addEventListener('click', () => toggleCustomizer(false));
+  }
+
+  // Close panel on outside click or escape key
+  document.addEventListener('click', (e) => {
+    if (customizerPanel && customizerPanel.classList.contains('active')) {
+      if (!customizerPanel.contains(e.target) && !customizerToggle.contains(e.target)) {
+        toggleCustomizer(false);
+      }
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && customizerPanel && customizerPanel.classList.contains('active')) {
+      toggleCustomizer(false);
+    }
+  });
+
+  // Switch to Default Cosmic Theme
+  function setCosmicTheme() {
+    if (optCosmic) optCosmic.classList.add('active');
+    if (optCustom) optCustom.classList.remove('active');
+    if (customBgLayer) customBgLayer.classList.remove('active');
+    if (canvas) canvas.style.opacity = '1';
+    try {
+      localStorage.setItem('dharun_portfolio_theme_mode', 'cosmic');
+    } catch (_) {}
+  }
+
+  // Switch to Custom Image Theme
+  function setCustomTheme() {
+    if (optCustom) optCustom.classList.add('active');
+    if (optCosmic) optCosmic.classList.remove('active');
+    if (customBgLayer) customBgLayer.classList.add('active');
+    if (canvas) canvas.style.opacity = '0.35';
+    try {
+      localStorage.setItem('dharun_portfolio_theme_mode', 'custom');
+    } catch (_) {}
+  }
+
+  if (optCosmic) optCosmic.addEventListener('click', setCosmicTheme);
+  if (optCustom) {
+    optCustom.addEventListener('click', () => {
+      setCustomTheme();
+      if (!currentObjectUrl && bgFileInput) {
+        bgFileInput.click();
+      }
+    });
+  }
+
+  // Handle image file selection
+  function handleImageFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+
+    // Revoke previous URL to prevent memory leaks
+    if (currentObjectUrl) {
+      URL.revokeObjectURL(currentObjectUrl);
+      currentObjectUrl = null;
+    }
+
+    currentObjectUrl = URL.createObjectURL(file);
+
+    // Apply to background layer & preview
+    if (customBgLayer) {
+      customBgLayer.style.backgroundImage = `url("${currentObjectUrl}")`;
+    }
+    if (previewThumbnail) {
+      previewThumbnail.src = currentObjectUrl;
+    }
+    if (previewFilename) {
+      previewFilename.textContent = file.name;
+    }
+    if (previewRow) {
+      previewRow.style.display = 'flex';
+    }
+    if (uploadStatusText) {
+      uploadStatusText.textContent = `Applied: ${file.name.substring(0, 16)}...`;
+    }
+
+    setCustomTheme();
+  }
+
+  if (bgFileInput) {
+    bgFileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (file) handleImageFile(file);
+    });
+  }
+
+  // Drag and drop support
+  if (dropZone) {
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('dragover');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('dragover');
+      });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) handleImageFile(file);
+    });
+  }
+
+  // Remove uploaded image
+  if (btnClearImg) {
+    btnClearImg.addEventListener('click', () => {
+      if (currentObjectUrl) {
+        URL.revokeObjectURL(currentObjectUrl);
+        currentObjectUrl = null;
+      }
+      if (customBgLayer) {
+        customBgLayer.style.backgroundImage = 'none';
+      }
+      if (previewRow) {
+        previewRow.style.display = 'none';
+      }
+      if (uploadStatusText) {
+        uploadStatusText.textContent = 'Click or drop image here';
+      }
+      if (bgFileInput) {
+        bgFileInput.value = '';
+      }
+      setCosmicTheme();
+    });
+  }
+
+  // Overlay Darkness Slider
+  if (overlaySlider) {
+    overlaySlider.addEventListener('input', (e) => {
+      const val = e.target.value;
+      if (overlayDisplay) {
+        overlayDisplay.textContent = `${val}%`;
+      }
+      if (bgOverlay) {
+        bgOverlay.style.backgroundColor = `rgba(2, 4, 10, ${val / 100})`;
+      }
+      try {
+        localStorage.setItem('dharun_portfolio_overlay_darkness', val);
+      } catch (_) {}
+    });
+  }
+
+  // Reset to Default Theme
+  if (btnResetTheme) {
+    btnResetTheme.addEventListener('click', () => {
+      if (currentObjectUrl) {
+        URL.revokeObjectURL(currentObjectUrl);
+        currentObjectUrl = null;
+      }
+      if (customBgLayer) {
+        customBgLayer.style.backgroundImage = 'none';
+      }
+      if (previewRow) {
+        previewRow.style.display = 'none';
+      }
+      if (uploadStatusText) {
+        uploadStatusText.textContent = 'Click or drop image here';
+      }
+      if (bgFileInput) {
+        bgFileInput.value = '';
+      }
+      if (overlaySlider) {
+        overlaySlider.value = 50;
+      }
+      if (overlayDisplay) {
+        overlayDisplay.textContent = '50%';
+      }
+      if (bgOverlay) {
+        bgOverlay.style.backgroundColor = 'rgba(2, 4, 10, 0.5)';
+      }
+      setCosmicTheme();
+      try {
+        localStorage.removeItem('dharun_portfolio_theme_mode');
+        localStorage.removeItem('dharun_portfolio_overlay_darkness');
+      } catch (_) {}
+    });
+  }
+
+  // Restore saved overlay darkness setting
+  try {
+    const savedDarkness = localStorage.getItem('dharun_portfolio_overlay_darkness');
+    if (savedDarkness && overlaySlider && bgOverlay) {
+      overlaySlider.value = savedDarkness;
+      if (overlayDisplay) overlayDisplay.textContent = `${savedDarkness}%`;
+      bgOverlay.style.backgroundColor = `rgba(2, 4, 10, ${savedDarkness / 100})`;
+    }
+  } catch (_) {}
+
+  // ==========================================================================
+  // 4. STICKY NAVBAR BACKDROP DYNAMICS
+  // ==========================================================================
+  const navbar = document.getElementById('navbar');
+  const handleNavbarScroll = () => {
+    if (!navbar) return;
+    if (window.scrollY > 40) {
+      navbar.classList.add('scrolled');
+    } else {
+      navbar.classList.remove('scrolled');
+    }
+  };
+  window.addEventListener('scroll', handleNavbarScroll, { passive: true });
+  handleNavbarScroll();
+
+  // ==========================================================================
+  // 5. ACTIVE NAV LINK SCROLLSPY
+  // ==========================================================================
+  const navSections = document.querySelectorAll('section[id]');
+  const desktopNavLinks = document.querySelectorAll('.nav-desktop .nav-link');
+
+  function updateActiveNavLink() {
+    const scrollY = window.pageYOffset;
+
+    navSections.forEach(section => {
+      const sectionHeight = section.offsetHeight;
+      const sectionTop = section.offsetTop - 120;
+      const sectionId = section.getAttribute('id');
+
+      if (scrollY >= sectionTop && scrollY < sectionTop + sectionHeight) {
+        desktopNavLinks.forEach(link => {
+          link.classList.remove('active');
+          if (link.getAttribute('href') === `#${sectionId}`) {
+            link.classList.add('active');
+          }
+        });
+      }
+    });
+  }
+
+  window.addEventListener('scroll', updateActiveNavLink, { passive: true });
+  updateActiveNavLink();
+
+  // ==========================================================================
+  // 6. MOBILE NAVIGATION DRAWER
+  // ==========================================================================
+  const navToggle = document.querySelector('.nav-toggle');
+  const mobileNav = document.getElementById('mobile-nav');
+  const mobileOverlay = document.getElementById('mobile-nav-overlay');
+  const navClose = document.querySelector('.nav-close');
+  const mobileLinks = document.querySelectorAll('.mobile-nav-link');
+
+  const openMobileNav = () => {
+    if (!navToggle || !mobileNav || !mobileOverlay) return;
+    navToggle.setAttribute('aria-expanded', 'true');
+    mobileNav.classList.add('active');
+    mobileOverlay.classList.add('active');
+    mobileNav.setAttribute('aria-hidden', 'false');
+    mobileNav.removeAttribute('tabindex');
+    mobileOverlay.setAttribute('aria-hidden', 'false');
+    
+    if (navClose) navClose.focus();
+    document.addEventListener('keydown', handleNavKeyboardTrap);
+    document.body.style.overflow = 'hidden';
+  };
+
+  const closeMobileNav = () => {
+    if (!navToggle || !mobileNav || !mobileOverlay) return;
+    navToggle.setAttribute('aria-expanded', 'false');
+    mobileNav.classList.remove('active');
+    mobileOverlay.classList.remove('active');
+    mobileNav.setAttribute('aria-hidden', 'true');
+    mobileNav.setAttribute('tabindex', '-1');
+    mobileOverlay.setAttribute('aria-hidden', 'true');
+    
+    document.removeEventListener('keydown', handleNavKeyboardTrap);
+    document.body.style.overflow = '';
+    navToggle.focus();
+  };
+
+  if (navToggle) {
+    navToggle.addEventListener('click', () => {
+      const isOpen = navToggle.getAttribute('aria-expanded') === 'true';
+      if (isOpen) closeMobileNav();
+      else openMobileNav();
+    });
+  }
+
+  if (navClose) navClose.addEventListener('click', closeMobileNav);
+  if (mobileOverlay) mobileOverlay.addEventListener('click', closeMobileNav);
+
+  mobileLinks.forEach(link => {
+    link.addEventListener('click', closeMobileNav);
+  });
+
+  function handleNavKeyboardTrap(e) {
+    if (e.key === 'Escape') closeMobileNav();
+    if (e.key === 'Tab') {
+      const focusables = mobileNav.querySelectorAll('a, button');
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          last.focus();
+          e.preventDefault();
+        }
+      } else {
+        if (document.activeElement === last) {
+          first.focus();
+          e.preventDefault();
+        }
+      }
+    }
+  }
+
+  // ==========================================================================
+  // 7. HERO SECTION TYPEWRITER EFFECT
+  // ==========================================================================
+  const words = [
+    "Web Developer",
+    "Full Stack Developer",
+    "AI Enthusiast",
+    "Software Engineer"
+  ];
+  let wordIdx = 0;
+  let charIdx = 0;
+  let isDeleting = false;
+  const typewriterEl = document.getElementById('typewriter');
+
+  function runTypewriter() {
+    if (!typewriterEl) return;
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      typewriterEl.textContent = words[0];
+      return;
+    }
+
+    const currentWord = words[wordIdx];
+    if (isDeleting) {
+      typewriterEl.textContent = currentWord.substring(0, charIdx - 1);
+      charIdx--;
+    } else {
+      typewriterEl.textContent = currentWord.substring(0, charIdx + 1);
+      charIdx++;
+    }
+
+    let delay = isDeleting ? 40 : 80;
+
+    if (!isDeleting && charIdx === currentWord.length) {
+      delay = 1800; // Pause showing complete text
+      isDeleting = true;
+    } else if (isDeleting && charIdx === 0) {
+      isDeleting = false;
+      wordIdx = (wordIdx + 1) % words.length;
+      delay = 320;
+    }
+
+    setTimeout(runTypewriter, delay);
+  }
+
+  runTypewriter();
+
+  // ==========================================================================
+  // 8. SKILLS PROGRESS BAR ANIMATION (INTERSECTION OBSERVER)
+  // ==========================================================================
+  const skillCards = document.querySelectorAll('.skills-category');
+
+  if ('IntersectionObserver' in window && skillCards.length > 0) {
+    const skillsObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const card = entry.target;
+          const fills = card.querySelectorAll('.skill-bar-fill');
+          fills.forEach(fill => {
+            const targetWidth = fill.getAttribute('data-progress');
+            fill.style.width = targetWidth;
+          });
+          observer.unobserve(card);
+        }
+      });
+    }, { threshold: 0.15 });
+
+    skillCards.forEach(card => {
+      skillsObserver.observe(card);
+    });
+  } else {
+    setTimeout(() => {
+      document.querySelectorAll('.skill-bar-fill').forEach(fill => {
+        fill.style.width = fill.getAttribute('data-progress');
+      });
+    }, 500);
+  }
+
+  // ==========================================================================
+  // 9. EXPERIENCE TIMELINE SCROLL FILL
+  // ==========================================================================
+  const timeline = document.querySelector('.timeline');
+  const timelineFill = document.getElementById('timeline-fill');
+  const timelineNodes = document.querySelectorAll('.timeline-node');
+
+  function updateTimeline() {
+    if (!timeline || !timelineFill) return;
+
+    const timelineRect = timeline.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+
+    const startTrigger = viewportHeight * 0.75;
+    const totalHeight = timelineRect.height;
+    const currentPosition = startTrigger - timelineRect.top;
+
+    let progress = currentPosition / totalHeight;
+    progress = Math.max(0, Math.min(1, progress));
+
+    timelineFill.style.height = `${progress * 100}%`;
+
+    timelineNodes.forEach(node => {
+      const marker = node.querySelector('.node-indicator');
+      if (!marker) return;
+      const markerRect = marker.getBoundingClientRect();
+      if (markerRect.top < startTrigger) {
+        node.classList.add('passed');
+      } else {
+        node.classList.remove('passed');
+      }
+    });
+  }
+
+  window.addEventListener('scroll', () => {
+    window.requestAnimationFrame(updateTimeline);
+  }, { passive: true });
+  updateTimeline();
+
+  // ==========================================================================
+  // 10. SCROLL-REVEAL SECTION ANIMATIONS
+  // ==========================================================================
+  const revealElements = document.querySelectorAll('.scroll-reveal');
+
+  if ('IntersectionObserver' in window) {
+    const revealObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('revealed');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, {
+      threshold: 0.05,
+      rootMargin: '0px 0px -50px 0px'
+    });
+
+    revealElements.forEach(el => {
+      revealObserver.observe(el);
+    });
+  } else {
+    revealElements.forEach(el => el.classList.add('revealed'));
+  }
+
+  // ==========================================================================
+  // 11. SUBTLE 3D HOVER TILT FOR PROJECT CARDS
+  // ==========================================================================
+  const projectCards = document.querySelectorAll('.tilt-element');
+
+  projectCards.forEach(card => {
+    card.addEventListener('mousemove', e => {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      
+      const rect = card.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+
+      const rotateX = ((centerY - y) / centerY) * 4;
+      const rotateY = ((x - centerX) / centerX) * 4;
+
+      card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+    });
+
+    card.addEventListener('mouseleave', () => {
+      card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)';
+    });
+  });
+
+});

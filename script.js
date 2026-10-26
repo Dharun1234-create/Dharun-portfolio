@@ -1,23 +1,169 @@
 document.addEventListener('DOMContentLoaded', () => {
-  
-  // ==========================================================================
-  // STICKY NAVBAR BACKDROP DYNAMICS
-  // ==========================================================================
-  const navbar = document.getElementById('navbar');
-  
-  const handleNavbarScroll = () => {
-    if (window.scrollY > 50) {
-      navbar.classList.add('scrolled');
-    } else {
-      navbar.classList.remove('scrolled');
-    }
-  };
-  
-  window.addEventListener('scroll', handleNavbarScroll, { passive: true });
-  handleNavbarScroll(); // Initial call in case user loads page scrolled down
 
   // ==========================================================================
-  // MOBILE NAVIGATION DRAWER
+  // 1. AMBIENT CANVAS — Subtle floating dot mesh
+  //    ~72 tiny particles with gentle drift and near-invisible connecting lines.
+  //    Pauses when tab is hidden. Respects prefers-reduced-motion.
+  // ==========================================================================
+  const canvas = document.getElementById('ambient-canvas');
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (canvas && !prefersReducedMotion) {
+    const ctx = canvas.getContext('2d');
+    let animId = null;
+    let isPageVisible = !document.hidden;
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    const DOT_COUNT = window.innerWidth < 768 ? 36 : 68;
+    const CONN_DIST = 110;
+
+    const DOT_COLORS = [
+      'rgba(37, 99, 235,',   // cobalt blue
+      'rgba(15, 118, 110,',  // teal
+      'rgba(100, 116, 139,', // slate
+    ];
+
+    function resizeCanvas() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width = `${window.innerWidth}px`;
+      canvas.style.height = `${window.innerHeight}px`;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    }
+
+    class Particle {
+      constructor() { this.reset(); }
+
+      reset() {
+        this.x = Math.random() * window.innerWidth;
+        this.y = Math.random() * window.innerHeight;
+        this.vx = (Math.random() - 0.5) * 0.20;
+        this.vy = (Math.random() - 0.5) * 0.16;
+        this.r = Math.random() * 1.5 + 0.7;
+        this.alpha = Math.random() * 0.14 + 0.05;
+        this.colorBase = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
+        this.phase = Math.random() * Math.PI * 2;
+        this.phaseSpd = Math.random() * 0.007 + 0.003;
+      }
+
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.phase += this.phaseSpd;
+        this.currentR = this.r + Math.sin(this.phase) * 0.25;
+
+        const w = window.innerWidth, h = window.innerHeight;
+        if (this.x < -10) this.x = w + 10;
+        else if (this.x > w + 10) this.x = -10;
+        if (this.y < -10) this.y = h + 10;
+        else if (this.y > h + 10) this.y = -10;
+      }
+
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.currentR, 0, Math.PI * 2);
+        ctx.fillStyle = `${this.colorBase} ${this.alpha})`;
+        ctx.fill();
+      }
+    }
+
+    let particles = [];
+
+    function initParticles() {
+      particles = [];
+      for (let i = 0; i < DOT_COUNT; i++) particles.push(new Particle());
+    }
+
+    function draw() {
+      if (!isPageVisible) {
+        animId = requestAnimationFrame(draw);
+        return;
+      }
+
+      const w = window.innerWidth, h = window.innerHeight;
+      ctx.clearRect(0, 0, w, h);
+
+      for (let i = 0; i < particles.length; i++) {
+        particles[i].update();
+        particles[i].draw();
+      }
+
+      // Faint connecting lines between close neighbours
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < CONN_DIST) {
+            const a = (1 - dist / CONN_DIST) * 0.055;
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `rgba(37, 99, 235, ${a})`;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+
+      animId = requestAnimationFrame(draw);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      isPageVisible = !document.hidden;
+    });
+
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { resizeCanvas(); initParticles(); }, 150);
+    }, { passive: true });
+
+    resizeCanvas();
+    initParticles();
+    animId = requestAnimationFrame(draw);
+  }
+
+  // ==========================================================================
+  // 2. STICKY NAVBAR — adds border + shadow once user scrolls
+  // ==========================================================================
+  const navbar = document.getElementById('navbar');
+
+  function onNavScroll() {
+    if (!navbar) return;
+    navbar.classList.toggle('scrolled', window.scrollY > 40);
+  }
+
+  window.addEventListener('scroll', onNavScroll, { passive: true });
+  onNavScroll();
+
+  // ==========================================================================
+  // 3. SCROLLSPY — highlights active nav link
+  // ==========================================================================
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('.nav-desktop .nav-link');
+
+  function updateScrollspy() {
+    const scrollY = window.pageYOffset;
+    sections.forEach(section => {
+      const top = section.offsetTop - 120;
+      const height = section.offsetHeight;
+      const id = section.getAttribute('id');
+      if (scrollY >= top && scrollY < top + height) {
+        navLinks.forEach(link => {
+          link.classList.toggle('active', link.getAttribute('href') === `#${id}`);
+        });
+      }
+    });
+  }
+
+  window.addEventListener('scroll', updateScrollspy, { passive: true });
+  updateScrollspy();
+
+  // ==========================================================================
+  // 4. MOBILE NAVIGATION DRAWER
   // ==========================================================================
   const navToggle = document.querySelector('.nav-toggle');
   const mobileNav = document.getElementById('mobile-nav');
@@ -25,115 +171,95 @@ document.addEventListener('DOMContentLoaded', () => {
   const navClose = document.querySelector('.nav-close');
   const mobileLinks = document.querySelectorAll('.mobile-nav-link');
 
-  const openMobileNav = () => {
+  const openNav = () => {
+    if (!navToggle || !mobileNav || !mobileOverlay) return;
     navToggle.setAttribute('aria-expanded', 'true');
     mobileNav.classList.add('active');
     mobileOverlay.classList.add('active');
     mobileNav.setAttribute('aria-hidden', 'false');
     mobileNav.removeAttribute('tabindex');
     mobileOverlay.setAttribute('aria-hidden', 'false');
-    
-    // Focus the first link or close button inside menu
-    navClose.focus();
-    
-    // Capture focus trap and escape keys
-    document.addEventListener('keydown', handleNavKeyboardTrap);
-    // Disable body scroll when menu open
+    if (navClose) navClose.focus();
+    document.addEventListener('keydown', trapFocus);
     document.body.style.overflow = 'hidden';
   };
 
-  const closeMobileNav = () => {
+  const closeNav = () => {
+    if (!navToggle || !mobileNav || !mobileOverlay) return;
     navToggle.setAttribute('aria-expanded', 'false');
     mobileNav.classList.remove('active');
     mobileOverlay.classList.remove('active');
     mobileNav.setAttribute('aria-hidden', 'true');
     mobileNav.setAttribute('tabindex', '-1');
     mobileOverlay.setAttribute('aria-hidden', 'true');
-    
-    document.removeEventListener('keydown', handleNavKeyboardTrap);
+    document.removeEventListener('keydown', trapFocus);
     document.body.style.overflow = '';
     navToggle.focus();
   };
 
-  navToggle.addEventListener('click', () => {
-    const isOpen = navToggle.getAttribute('aria-expanded') === 'true';
-    if (isOpen) {
-      closeMobileNav();
-    } else {
-      openMobileNav();
-    }
-  });
-
-  if (navClose) navClose.addEventListener('click', closeMobileNav);
-  if (mobileOverlay) mobileOverlay.addEventListener('click', closeMobileNav);
-
-  mobileLinks.forEach(link => {
-    link.addEventListener('click', closeMobileNav);
-  });
-
-  function handleNavKeyboardTrap(e) {
-    if (e.key === 'Escape') {
-      closeMobileNav();
-    }
-    
+  function trapFocus(e) {
+    if (e.key === 'Escape') { closeNav(); return; }
     if (e.key === 'Tab') {
       const focusables = mobileNav.querySelectorAll('a, button');
-      if (focusables.length === 0) return;
-      
+      if (!focusables.length) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
-      
-      if (e.shiftKey) { // Back tab
-        if (document.activeElement === first) {
-          last.focus();
-          e.preventDefault();
-        }
-      } else { // Normal tab
-        if (document.activeElement === last) {
-          first.focus();
-          e.preventDefault();
-        }
+      if (e.shiftKey) {
+        if (document.activeElement === first) { last.focus(); e.preventDefault(); }
+      } else {
+        if (document.activeElement === last) { first.focus(); e.preventDefault(); }
       }
     }
   }
 
+  if (navToggle) {
+    navToggle.addEventListener('click', () => {
+      navToggle.getAttribute('aria-expanded') === 'true' ? closeNav() : openNav();
+    });
+  }
+  if (navClose) navClose.addEventListener('click', closeNav);
+  if (mobileOverlay) mobileOverlay.addEventListener('click', closeNav);
+  mobileLinks.forEach(link => link.addEventListener('click', closeNav));
+
   // ==========================================================================
-  // HERO SECTION TYPEWRITER EFFECT
+  // 5. TYPEWRITER — role cycling
   // ==========================================================================
-  const words = ["Full Stack Developer", "B.Tech IT Student", "Problem Solver"];
+  const roles = [
+    'Web Developer',
+    'Full Stack Developer',
+    'AI Enthusiast',
+    'Software Engineer',
+  ];
+
   let wordIdx = 0;
   let charIdx = 0;
   let isDeleting = false;
-  const typewriterEl = document.getElementById('typewriter');
+  const twEl = document.getElementById('typewriter');
 
   function runTypewriter() {
-    if (!typewriterEl) return;
+    if (!twEl) return;
 
-    // Check accessibility reduced motion state
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReducedMotion) {
-      typewriterEl.textContent = words[0];
+      twEl.textContent = roles[0];
       return;
     }
 
-    const currentWord = words[wordIdx];
-    if (isDeleting) {
-      typewriterEl.textContent = currentWord.substring(0, charIdx - 1);
-      charIdx--;
-    } else {
-      typewriterEl.textContent = currentWord.substring(0, charIdx + 1);
-      charIdx++;
-    }
+    const word = roles[wordIdx];
+    twEl.textContent = isDeleting
+      ? word.substring(0, charIdx - 1)
+      : word.substring(0, charIdx + 1);
 
-    let delay = isDeleting ? 40 : 80;
+    isDeleting ? charIdx-- : charIdx++;
 
-    if (!isDeleting && charIdx === currentWord.length) {
-      delay = 1800; // Pause showing complete text
+    let delay = isDeleting ? 42 : 78;
+
+    if (!isDeleting && charIdx === word.length) {
+      delay = 1900;
       isDeleting = true;
     } else if (isDeleting && charIdx === 0) {
       isDeleting = false;
-      wordIdx = (wordIdx + 1) % words.length;
-      delay = 300; // Pause before typing next title
+      wordIdx = (wordIdx + 1) % roles.length;
+      delay = 300;
     }
 
     setTimeout(runTypewriter, delay);
@@ -142,137 +268,96 @@ document.addEventListener('DOMContentLoaded', () => {
   runTypewriter();
 
   // ==========================================================================
-  // SKILLS PROGRESS BAR ANIMATION (INTERSECTION OBSERVER)
+  // 6. SKILL BARS — animate on intersect
   // ==========================================================================
-  const skillCards = document.querySelectorAll('.skills-category');
+  const skillGroups = document.querySelectorAll('.skill-group');
 
-  if ('IntersectionObserver' in window && skillCards.length > 0) {
-    const skillsObserver = new IntersectionObserver((entries, observer) => {
+  if ('IntersectionObserver' in window && skillGroups.length) {
+    const skillsObs = new IntersectionObserver((entries, obs) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
-          const card = entry.target;
-          const fills = card.querySelectorAll('.skill-bar-fill');
-          fills.forEach(fill => {
-            const targetWidth = fill.getAttribute('data-progress');
-            fill.style.width = targetWidth;
+          entry.target.querySelectorAll('.skill-fill').forEach(bar => {
+            bar.style.width = bar.getAttribute('data-progress');
           });
-          observer.unobserve(card); // Animate this card once
+          obs.unobserve(entry.target);
         }
       });
-    }, { threshold: 0.15 });
+    }, { threshold: 0.18 });
 
-    skillCards.forEach(card => {
-      skillsObserver.observe(card);
-    });
+    skillGroups.forEach(g => skillsObs.observe(g));
   } else {
-    // Fallback if IntersectionObserver not supported
     setTimeout(() => {
-      document.querySelectorAll('.skill-bar-fill').forEach(fill => {
-        fill.style.width = fill.getAttribute('data-progress');
+      document.querySelectorAll('.skill-fill').forEach(bar => {
+        bar.style.width = bar.getAttribute('data-progress');
       });
-    }, 500);
+    }, 400);
   }
 
   // ==========================================================================
-  // EXPERIENCE TIMELINE SCROLL FILL
+  // 7. TIMELINE — scroll-driven fill + node activation
   // ==========================================================================
   const timeline = document.querySelector('.timeline');
-  const timelineFill = document.getElementById('timeline-fill');
-  const timelineNodes = document.querySelectorAll('.timeline-node');
+  const tlFill = document.getElementById('timeline-fill');
+  const tlItems = document.querySelectorAll('.timeline-item');
 
   function updateTimeline() {
-    if (!timeline || !timelineFill) return;
+    if (!timeline || !tlFill) return;
+    const rect = timeline.getBoundingClientRect();
+    const vH = window.innerHeight;
+    const trigger = vH * 0.78;
+    const progress = Math.max(0, Math.min(1, (trigger - rect.top) / rect.height));
+    tlFill.style.height = `${progress * 100}%`;
 
-    const timelineRect = timeline.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-
-    // Timeline fill activates when its top enters 75% of viewport
-    // and finishes filling when its bottom reaches 25% of viewport
-    const startTrigger = viewportHeight * 0.75;
-    const endTrigger = viewportHeight * 0.25;
-
-    const totalHeight = timelineRect.height;
-    const currentPosition = startTrigger - timelineRect.top;
-
-    let progress = currentPosition / totalHeight;
-    progress = Math.max(0, Math.min(1, progress));
-
-    timelineFill.style.height = `${progress * 100}%`;
-
-    // Mark nodes as passed/active depending on trigger boundary crossing
-    timelineNodes.forEach(node => {
-      const marker = node.querySelector('.node-indicator');
+    tlItems.forEach(item => {
+      const marker = item.querySelector('.marker-dot');
       if (!marker) return;
-      
-      const markerRect = marker.getBoundingClientRect();
-      // If the node indicator is above the start trigger view, mark it as active/passed
-      if (markerRect.top < startTrigger) {
-        node.classList.add('passed');
-      } else {
-        node.classList.remove('passed');
-      }
+      const mRect = marker.getBoundingClientRect();
+      item.classList.toggle('passed', mRect.top < trigger);
     });
   }
 
-  window.addEventListener('scroll', () => {
-    window.requestAnimationFrame(updateTimeline);
-  }, { passive: true });
-  
-  // Trigger initial timeline sizing
+  window.addEventListener('scroll', () => requestAnimationFrame(updateTimeline), { passive: true });
   updateTimeline();
 
   // ==========================================================================
-  // SCROLL-REVEAL SECTION ANIMATIONS (FADE + TRANSLATEY)
+  // 8. SCROLL REVEAL — sections fade + slide up on enter
   // ==========================================================================
-  const revealElements = document.querySelectorAll('.scroll-reveal');
+  const revealEls = document.querySelectorAll('.scroll-reveal');
 
   if ('IntersectionObserver' in window) {
-    const revealObserver = new IntersectionObserver((entries, observer) => {
+    const revealObs = new IntersectionObserver((entries, obs) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
           entry.target.classList.add('revealed');
-          observer.unobserve(entry.target);
+          obs.unobserve(entry.target);
         }
       });
-    }, {
-      threshold: 0.05,
-      rootMargin: '0px 0px -50px 0px'
-    });
+    }, { threshold: 0.05, rootMargin: '0px 0px -36px 0px' });
 
-    revealElements.forEach(el => {
-      revealObserver.observe(el);
-    });
+    revealEls.forEach(el => revealObs.observe(el));
   } else {
-    // Fallback if observer not present
-    revealElements.forEach(el => el.classList.add('revealed'));
+    revealEls.forEach(el => el.classList.add('revealed'));
   }
 
   // ==========================================================================
-  // SUBTLE 3D HOVER TILT FOR PROJECT CARDS
+  // 9. PROJECT CARD MICRO-TILT (desktop hover, reduced-motion safe)
   // ==========================================================================
-  const projectCards = document.querySelectorAll('.tilt-element');
+  if (!prefersReducedMotion && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    document.querySelectorAll('.project-card').forEach(card => {
+      card.addEventListener('mousemove', e => {
+        const r = card.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        const y = e.clientY - r.top;
+        const rx = ((r.height / 2 - y) / r.height) * 3;
+        const ry = ((x - r.width / 2) / r.width) * 3;
+        card.style.transform =
+          `perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) translateY(-3px)`;
+      });
 
-  projectCards.forEach(card => {
-    card.addEventListener('mousemove', e => {
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      
-      const rect = card.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-
-      const centerX = rect.width / 2;
-      const centerY = rect.height / 2;
-
-      // Restrict rotation to max 5 degrees for sleek movement
-      const rotateX = ((centerY - y) / centerY) * 5;
-      const rotateY = ((x - centerX) / centerX) * 5;
-
-      card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+      card.addEventListener('mouseleave', () => {
+        card.style.transform = '';
+      });
     });
-
-    card.addEventListener('mouseleave', () => {
-      card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)';
-    });
-  });
+  }
 
 });

@@ -1,0 +1,409 @@
+document.addEventListener('DOMContentLoaded', () => {
+
+  // ==========================================================================
+  // 1. SUBTLE AMBIENT BACKGROUND — Tiny floating dots, very low opacity
+  //    Lightweight: ~80 particles, no complex physics, requestAnimationFrame loop.
+  //    Respects prefers-reduced-motion.
+  // ==========================================================================
+  const canvas = document.getElementById('ambient-canvas');
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (canvas && !prefersReducedMotion) {
+    const ctx = canvas.getContext('2d');
+    let animId = null;
+    let isPageVisible = !document.hidden;
+
+    const DOT_COUNT  = window.innerWidth < 768 ? 40 : 72;
+    const CONN_DIST  = 120; // px — distance to draw faint connecting lines
+
+    // Colour stops in the blue/teal family, very muted
+    const DOT_COLORS = [
+      'rgba(37, 99, 235,',   // cobalt blue
+      'rgba(15, 118, 110,',  // teal
+      'rgba(100, 116, 139,', // slate
+    ];
+
+    function resizeCanvas() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width  = window.innerWidth  * dpr;
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width  = `${window.innerWidth}px`;
+      canvas.style.height = `${window.innerHeight}px`;
+      ctx.scale(dpr, dpr);
+    }
+
+    class Dot {
+      constructor() { this.reset(); }
+
+      reset() {
+        this.x  = Math.random() * window.innerWidth;
+        this.y  = Math.random() * window.innerHeight;
+        this.vx = (Math.random() - 0.5) * 0.22;
+        this.vy = (Math.random() - 0.5) * 0.18;
+        this.r  = Math.random() * 1.6 + 0.8;
+        this.alpha   = Math.random() * 0.18 + 0.06;
+        this.colorBase = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
+        // Gentle drift phase for subtle size pulsing
+        this.phase = Math.random() * Math.PI * 2;
+        this.phaseSpeed = Math.random() * 0.008 + 0.003;
+      }
+
+      update(time) {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.phase += this.phaseSpeed;
+
+        // Gentle size oscillation
+        this.currentR = this.r + Math.sin(this.phase) * 0.3;
+
+        // Wrap around edges
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        if (this.x < -10)      this.x = w + 10;
+        else if (this.x > w + 10) this.x = -10;
+        if (this.y < -10)      this.y = h + 10;
+        else if (this.y > h + 10) this.y = -10;
+      }
+
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.currentR, 0, Math.PI * 2);
+        ctx.fillStyle = `${this.colorBase} ${this.alpha})`;
+        ctx.fill();
+      }
+    }
+
+    let dots = [];
+
+    function initDots() {
+      dots = [];
+      for (let i = 0; i < DOT_COUNT; i++) {
+        dots.push(new Dot());
+      }
+    }
+
+    let startTime = performance.now();
+
+    function animate(now) {
+      if (!isPageVisible) {
+        animId = requestAnimationFrame(animate);
+        return;
+      }
+
+      const time = (now - startTime) * 0.001;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Update & draw dots
+      for (let i = 0; i < dots.length; i++) {
+        dots[i].update(time);
+        dots[i].draw();
+      }
+
+      // Draw faint connecting lines between nearby dots
+      for (let i = 0; i < dots.length; i++) {
+        for (let j = i + 1; j < dots.length; j++) {
+          const dx = dots[i].x - dots[j].x;
+          const dy = dots[i].y - dots[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < CONN_DIST) {
+            const lineAlpha = (1 - dist / CONN_DIST) * 0.07;
+            ctx.beginPath();
+            ctx.moveTo(dots[i].x, dots[i].y);
+            ctx.lineTo(dots[j].x, dots[j].y);
+            ctx.strokeStyle = `rgba(37, 99, 235, ${lineAlpha})`;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+
+      animId = requestAnimationFrame(animate);
+    }
+
+    // Pause when tab is hidden
+    document.addEventListener('visibilitychange', () => {
+      isPageVisible = !document.hidden;
+    });
+
+    window.addEventListener('resize', () => {
+      resizeCanvas();
+      initDots();
+    }, { passive: true });
+
+    resizeCanvas();
+    initDots();
+    animId = requestAnimationFrame(animate);
+  }
+
+  // ==========================================================================
+  // 2. STICKY NAVBAR — border & shadow on scroll
+  // ==========================================================================
+  const navbar = document.getElementById('navbar');
+
+  const handleNavbarScroll = () => {
+    if (!navbar) return;
+    if (window.scrollY > 40) {
+      navbar.classList.add('scrolled');
+    } else {
+      navbar.classList.remove('scrolled');
+    }
+  };
+
+  window.addEventListener('scroll', handleNavbarScroll, { passive: true });
+  handleNavbarScroll();
+
+  // ==========================================================================
+  // 3. ACTIVE NAV LINK — SCROLLSPY
+  // ==========================================================================
+  const navSections    = document.querySelectorAll('section[id]');
+  const desktopNavLinks = document.querySelectorAll('.nav-desktop .nav-link');
+
+  function updateActiveNavLink() {
+    const scrollY = window.pageYOffset;
+
+    navSections.forEach(section => {
+      const sectionTop    = section.offsetTop - 120;
+      const sectionHeight = section.offsetHeight;
+      const sectionId     = section.getAttribute('id');
+
+      if (scrollY >= sectionTop && scrollY < sectionTop + sectionHeight) {
+        desktopNavLinks.forEach(link => {
+          link.classList.remove('active');
+          if (link.getAttribute('href') === `#${sectionId}`) {
+            link.classList.add('active');
+          }
+        });
+      }
+    });
+  }
+
+  window.addEventListener('scroll', updateActiveNavLink, { passive: true });
+  updateActiveNavLink();
+
+  // ==========================================================================
+  // 4. MOBILE NAVIGATION DRAWER
+  // ==========================================================================
+  const navToggle     = document.querySelector('.nav-toggle');
+  const mobileNav     = document.getElementById('mobile-nav');
+  const mobileOverlay = document.getElementById('mobile-nav-overlay');
+  const navClose      = document.querySelector('.nav-close');
+  const mobileLinks   = document.querySelectorAll('.mobile-nav-link');
+
+  const openMobileNav = () => {
+    if (!navToggle || !mobileNav || !mobileOverlay) return;
+    navToggle.setAttribute('aria-expanded', 'true');
+    mobileNav.classList.add('active');
+    mobileOverlay.classList.add('active');
+    mobileNav.setAttribute('aria-hidden', 'false');
+    mobileNav.removeAttribute('tabindex');
+    mobileOverlay.setAttribute('aria-hidden', 'false');
+    if (navClose) navClose.focus();
+    document.addEventListener('keydown', handleNavKeyboardTrap);
+    document.body.style.overflow = 'hidden';
+  };
+
+  const closeMobileNav = () => {
+    if (!navToggle || !mobileNav || !mobileOverlay) return;
+    navToggle.setAttribute('aria-expanded', 'false');
+    mobileNav.classList.remove('active');
+    mobileOverlay.classList.remove('active');
+    mobileNav.setAttribute('aria-hidden', 'true');
+    mobileNav.setAttribute('tabindex', '-1');
+    mobileOverlay.setAttribute('aria-hidden', 'true');
+    document.removeEventListener('keydown', handleNavKeyboardTrap);
+    document.body.style.overflow = '';
+    navToggle.focus();
+  };
+
+  if (navToggle) {
+    navToggle.addEventListener('click', () => {
+      const isOpen = navToggle.getAttribute('aria-expanded') === 'true';
+      isOpen ? closeMobileNav() : openMobileNav();
+    });
+  }
+
+  if (navClose)      navClose.addEventListener('click', closeMobileNav);
+  if (mobileOverlay) mobileOverlay.addEventListener('click', closeMobileNav);
+
+  mobileLinks.forEach(link => link.addEventListener('click', closeMobileNav));
+
+  function handleNavKeyboardTrap(e) {
+    if (e.key === 'Escape') { closeMobileNav(); return; }
+    if (e.key === 'Tab') {
+      const focusables = mobileNav.querySelectorAll('a, button');
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last  = focusables[focusables.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { last.focus(); e.preventDefault(); }
+      } else {
+        if (document.activeElement === last) { first.focus(); e.preventDefault(); }
+      }
+    }
+  }
+
+  // ==========================================================================
+  // 5. TYPEWRITER EFFECT
+  // ==========================================================================
+  const words = [
+    'Web Developer',
+    'Full Stack Developer',
+    'AI Enthusiast',
+    'Software Engineer',
+  ];
+
+  let wordIdx   = 0;
+  let charIdx   = 0;
+  let isDeleting = false;
+  const typewriterEl = document.getElementById('typewriter');
+
+  function runTypewriter() {
+    if (!typewriterEl) return;
+
+    if (prefersReducedMotion) {
+      typewriterEl.textContent = words[0];
+      return;
+    }
+
+    const currentWord = words[wordIdx];
+
+    if (isDeleting) {
+      typewriterEl.textContent = currentWord.substring(0, charIdx - 1);
+      charIdx--;
+    } else {
+      typewriterEl.textContent = currentWord.substring(0, charIdx + 1);
+      charIdx++;
+    }
+
+    let delay = isDeleting ? 40 : 80;
+
+    if (!isDeleting && charIdx === currentWord.length) {
+      delay = 1800;
+      isDeleting = true;
+    } else if (isDeleting && charIdx === 0) {
+      isDeleting = false;
+      wordIdx = (wordIdx + 1) % words.length;
+      delay = 320;
+    }
+
+    setTimeout(runTypewriter, delay);
+  }
+
+  runTypewriter();
+
+  // ==========================================================================
+  // 6. SKILLS PROGRESS BARS — Intersection Observer
+  // ==========================================================================
+  const skillCards = document.querySelectorAll('.skills-category');
+
+  if ('IntersectionObserver' in window && skillCards.length > 0) {
+    const skillsObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const fills = entry.target.querySelectorAll('.skill-bar-fill');
+          fills.forEach(fill => {
+            fill.style.width = fill.getAttribute('data-progress');
+          });
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15 });
+
+    skillCards.forEach(card => skillsObserver.observe(card));
+  } else {
+    setTimeout(() => {
+      document.querySelectorAll('.skill-bar-fill').forEach(fill => {
+        fill.style.width = fill.getAttribute('data-progress');
+      });
+    }, 500);
+  }
+
+  // ==========================================================================
+  // 7. EXPERIENCE TIMELINE — Scroll fill animation
+  // ==========================================================================
+  const timeline     = document.querySelector('.timeline');
+  const timelineFill = document.getElementById('timeline-fill');
+  const timelineNodes = document.querySelectorAll('.timeline-node');
+
+  function updateTimeline() {
+    if (!timeline || !timelineFill) return;
+
+    const rect           = timeline.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const startTrigger   = viewportHeight * 0.75;
+    const totalHeight    = rect.height;
+    const currentPosition = startTrigger - rect.top;
+
+    let progress = Math.max(0, Math.min(1, currentPosition / totalHeight));
+    timelineFill.style.height = `${progress * 100}%`;
+
+    timelineNodes.forEach(node => {
+      const marker = node.querySelector('.node-indicator');
+      if (!marker) return;
+      const markerRect = marker.getBoundingClientRect();
+      if (markerRect.top < startTrigger) {
+        node.classList.add('passed');
+      } else {
+        node.classList.remove('passed');
+      }
+    });
+  }
+
+  window.addEventListener('scroll', () => {
+    window.requestAnimationFrame(updateTimeline);
+  }, { passive: true });
+  updateTimeline();
+
+  // ==========================================================================
+  // 8. SCROLL-REVEAL — Intersection Observer
+  // ==========================================================================
+  const revealElements = document.querySelectorAll('.scroll-reveal');
+
+  if ('IntersectionObserver' in window) {
+    const revealObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('revealed');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, {
+      threshold: 0.05,
+      rootMargin: '0px 0px -40px 0px',
+    });
+
+    revealElements.forEach(el => revealObserver.observe(el));
+  } else {
+    // Fallback: reveal immediately
+    revealElements.forEach(el => el.classList.add('revealed'));
+  }
+
+  // ==========================================================================
+  // 9. SUBTLE PROJECT CARD TILT (Desktop only, reduced motion safe)
+  // ==========================================================================
+  if (!prefersReducedMotion && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    const projectCards = document.querySelectorAll('.project-card');
+
+    projectCards.forEach(card => {
+      card.addEventListener('mousemove', e => {
+        const rect    = card.getBoundingClientRect();
+        const x       = e.clientX - rect.left;
+        const y       = e.clientY - rect.top;
+        const centerX = rect.width  / 2;
+        const centerY = rect.height / 2;
+        const rotateX = ((centerY - y) / centerY) * 3;
+        const rotateY = ((x - centerX) / centerX) * 3;
+        card.style.transform = `perspective(900px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-2px)`;
+      });
+
+      card.addEventListener('mouseleave', () => {
+        card.style.transform = '';
+      });
+    });
+  }
+
+});
